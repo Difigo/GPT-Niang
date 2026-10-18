@@ -1,4 +1,4 @@
-﻿# Bundled local quotes; attribution is in assets/quotes-LICENSE.txt. No network or account data is used.
+﻿# Local selection and history; attribution is in assets/quotes-LICENSE.txt. Optional generation runs in the worker.
 $script:widgetQuotesBuiltInPath=Join-Path $PSScriptRoot '..\assets\quotes.json'
 $script:widgetQuoteRandom=New-Object System.Random
 $script:widgetQuoteLastByDataDir=@{}
@@ -55,16 +55,87 @@ function Get-WidgetQuoteSettings([string]$DataDir) {
 
 function Get-WidgetQuote([string]$DataDir) {
   $settings=Get-WidgetQuoteSettings $DataDir
+  $generation=Get-WidgetGenerationSettings $DataDir
+  $rows=@($settings.quotes)
+  if($generation.enabled){
+    try{$rows+=@(Read-WidgetQuoteFile (Join-Path $DataDir 'generated-quotes.json'))}catch{}
+    $seen=@{};$rows=@(foreach($row in $rows){$id=Get-WidgetQuoteKey $row.text;if(!$seen.ContainsKey($id)){$seen[$id]=$true;$row}})
+    $history=Read-WidgetQuoteHistory $DataDir
+    $unseen=@($rows|Where-Object{!$history.shown.ContainsKey((Get-WidgetQuoteKey $_.text))})
+    if($unseen.Count-gt 0){$rows=$unseen}
+  }
   $key=[IO.Path]::GetFullPath($DataDir)
   $last=$script:widgetQuoteLastByDataDir[$key]
-  $candidates=@($settings.quotes | Where-Object {![string]::Equals($_.text,$last,[StringComparison]::Ordinal)})
-  if($candidates.Count-eq 0){$candidates=@($settings.quotes)}
+  $candidates=@($rows | Where-Object {![string]::Equals($_.text,$last,[StringComparison]::Ordinal)})
+  if($candidates.Count-eq 0){$candidates=$rows}
   $total=0.0;foreach($entry in $candidates){$total+=$entry.weight}
   $draw=$script:widgetQuoteRandom.NextDouble()*$total
   $choice=$candidates[$candidates.Count-1]
   foreach($entry in $candidates){$draw-=$entry.weight;if($draw-lt 0){$choice=$entry;break}}
   $script:widgetQuoteLastByDataDir[$key]=$choice.text
   [string]$choice.text
+}
+
+function Get-WidgetQuoteKey([string]$Text) {
+  $normalized=$Text.Normalize([Text.NormalizationForm]::FormKC)-replace '\s+',''
+  $hash=[Security.Cryptography.SHA256]::Create()
+  try{return ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalized)))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
+}
+function Write-WidgetQuoteJson([string]$Path,$Value) {
+  $null=[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
+  $temporary=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+  try{
+    [IO.File]::WriteAllText($temporary,($Value|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
+    if([IO.File]::Exists($Path)){[IO.File]::Replace($temporary,$Path,($Path+'.bak'),$true)}else{[IO.File]::Move($temporary,$Path)}
+  }finally{if([IO.File]::Exists($temporary)){[IO.File]::Delete($temporary)}}
+}
+function Read-WidgetQuoteHistory([string]$DataDir) {
+  $history=@{version=1;startedAt=[DateTime]::UtcNow.ToString('o');shown=@{}}
+  try{
+    $saved=[IO.File]::ReadAllText((Join-Path $DataDir 'quote-history.json'),[Text.Encoding]::UTF8)|ConvertFrom-Json
+    if($saved.startedAt){$history.startedAt=$saved.startedAt}
+    foreach($property in $saved.shown.PSObject.Properties){if($property.Name-match '^[a-f0-9]{64}$'){$history.shown[$property.Name]=[string]$property.Value}}
+  }catch{}
+  return $history
+}
+function Initialize-WidgetQuoteHistory([string]$DataDir) {
+  if(![IO.File]::Exists((Join-Path $DataDir 'quote-history.json'))){Write-WidgetQuoteJson (Join-Path $DataDir 'quote-history.json') (Read-WidgetQuoteHistory $DataDir)}
+}
+function Register-WidgetQuoteShown([string]$DataDir,[string]$Text) {
+  if(!$Text){return}
+  $history=Read-WidgetQuoteHistory $DataDir
+  $id=Get-WidgetQuoteKey $Text
+  if($history.shown.ContainsKey($id)){return}
+  $history.shown[$id]=[DateTime]::UtcNow.ToString('o')
+  Write-WidgetQuoteJson (Join-Path $DataDir 'quote-history.json') $history
+}
+function Get-WidgetGenerationSettings([string]$DataDir) {
+  $personaPath=Join-Path (Split-Path $script:widgetQuotesBuiltInPath -Parent) 'quote-persona.txt'
+  $persona=if([IO.File]::Exists($personaPath)){[IO.File]::ReadAllText($personaPath,[Text.Encoding]::UTF8).Trim()}else{''}
+  $result=@{enabled=$false;threshold=20;batchSize=43;maxDaily=2;minIntervalMinutes=30;model='';persona=$persona;revision=''}
+  try{
+    $saved=[IO.File]::ReadAllText((Join-Path $DataDir 'quote-generation.json'),[Text.Encoding]::UTF8)|ConvertFrom-Json
+    $result.enabled=$saved.enabled-is [bool] -and $saved.enabled
+    foreach($spec in @(@('threshold',1,1000),@('batchSize',1,200),@('maxDaily',1,100),@('minIntervalMinutes',1,1440))){
+      $value=$saved.($spec[0]);if(($value-is [int] -or $value-is [long]) -and $value-ge $spec[1] -and $value-le $spec[2]){$result[$spec[0]]=[int]$value}
+    }
+    if($saved.model-is [string] -and $saved.model-match '^[A-Za-z0-9._:/-]{0,160}$'){$result.model=$saved.model}
+    if($saved.persona-is [string] -and $saved.persona.Trim() -and $saved.persona.Length-le 6000){$result.persona=$saved.persona.Trim()}
+    if($saved.revision-is [string]){$result.revision=$saved.revision}
+  }catch{}
+  return $result
+}
+function Save-WidgetGenerationSettings([string]$DataDir,$Value) {
+  $saved=@{version=1;revision=[Guid]::NewGuid().ToString('N');enabled=[bool]$Value.enabled}
+  foreach($spec in @(@('threshold',1,1000),@('batchSize',1,200),@('maxDaily',1,100),@('minIntervalMinutes',1,1440))){
+    $number=0
+    if(![int]::TryParse([string]$Value[$spec[0]],[ref]$number) -or $number-lt $spec[1] -or $number-gt $spec[2]){throw ($spec[0]+' 须为 '+$spec[1]+'–'+$spec[2]+' 之间的整数。')}
+    $saved[$spec[0]]=$number
+  }
+  if($Value.model-isnot [string] -or $Value.model-notmatch '^[A-Za-z0-9._:/-]{0,160}$'){throw '请填写有效模型名，或留空沿用 Codex CLI 模型配置。'}
+  if($Value.persona-isnot [string] -or !$Value.persona.Trim() -or $Value.persona.Length-gt 6000){throw '人设与规则须为 1–6000 个字符。'}
+  $saved.model=$Value.model;$saved.persona=$Value.persona.Trim()
+  Write-WidgetQuoteJson (Join-Path $DataDir 'quote-generation.json') $saved
 }
 
 function Save-WidgetQuotes([string]$DataDir,$Quotes) {

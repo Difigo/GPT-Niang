@@ -16,15 +16,24 @@ let refresh;
 const ipc=createPipeRefreshHandler(()=>{if(refresh)void refresh.request();});
 const lock=await acquireWorkerLock(config.dataDir,parentPid,{onLost:()=>process.exit(1),onConnection:ipc.onConnection});
 if(!lock)process.exit(0);
+// Windows opt-in only. macOS retains its existing read-only behavior and does
+// not need to package the new persona or expose a settings UI yet.
+let quoteReplenisher=null;
+if(process.platform==='win32'){
+  const {createQuoteReplenisher}=await import('./quote-generation.mjs');
+  const {createCodexQuoteGenerator}=await import('./quote-codex.mjs');
+  quoteReplenisher=createQuoteReplenisher({dataDir:config.dataDir,builtIn:path.join(config.appDir??path.dirname(process.argv[2]),'assets','quotes.json'),generate:createCodexQuoteGenerator(config)});
+}
 const statusFile=path.join(config.dataDir,'status.json');
 const healthFile=path.join(config.dataDir,'worker-status.json');
 let status=null,requestToken=readRefreshRequest(path.join(config.dataDir,'refresh.flag')),lastActivity=Date.now(),heartbeat;
 const activeRequestIds=new Set();
 const initialStop=readRefreshRequest(path.join(config.dataDir,'stop.flag'));
 const save=data=>{atomicJson(statusFile,data);status=data;};
-const health=()=>atomicJson(healthFile,{...lock.owner,at:Date.now(),busy:refresh.busy,lastRefresh:refresh.lastRefresh});
+const health=()=>atomicJson(healthFile,{...lock.owner,at:Date.now(),busy:refresh.busy || !!quoteReplenisher?.busy,lastRefresh:refresh.lastRefresh});
 function exit() {
   clearInterval(heartbeat);
+  quoteReplenisher?.close();
   try{if(readJson(healthFile)?.token===lock.owner.token)fs.unlinkSync(healthFile);}catch{}
   try{lock.release();}catch{}
 }
@@ -67,6 +76,9 @@ heartbeat=setInterval(()=>{
   // No background queries while Codex is not visible; a fresh query on return.
   const now=Date.now(),presence=readJson(path.join(config.dataDir,'presence.json'));
   const active=presence?.visible && now-presence.at>=0 && now-presence.at<5000 && processAlive(presence.pid);
+  // Desktop mode can keep the widget visible after Codex closes/minimizes.
+  // Require an explicit current host-visible field from the Windows UI too.
+  quoteReplenisher?.tick({visible:!!(active && presence.codexVisible===true),ownerPid:active?presence.pid:null});
   if(active)lastActivity=now;
   const request=readRefreshRequest(path.join(config.dataDir,'refresh.flag'));
   const requested=request!==null && request!==requestToken;

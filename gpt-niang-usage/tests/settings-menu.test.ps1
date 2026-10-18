@@ -24,7 +24,7 @@ $script:scale=1.0;$script:soundOn=$true;$script:soundVolume=0.9;$script:bubbleTa
 $script:colorMode='mixed';$script:colorChance=0.5;$script:colorTextChance=3;$script:colorPaused=$false
 try{
   Initialize-WidgetSettingsMenu
-  $expected=@('查看额度','换一句台词','刷新额度','编辑我的语录','显示与位置','外观设置','声音与点击','更新','退出 GPT 娘')
+  $expected=@('查看额度','换一句台词','刷新额度','编辑我的语录','自动补充台词…','显示与位置','外观设置','声音与点击','更新','退出 GPT 娘')
   $actual=@($script:context.Items|Where-Object{$_.Header-is [string]}|ForEach-Object{$_.Header})
   Assert-Equal ($actual-join '|') ($expected-join '|') 'Menu entries and removed title block'
   Assert-Equal $script:settingsMenuUi.UpdateVersion.Header '当前版本：1.3.2' 'Update menu shows actual version'

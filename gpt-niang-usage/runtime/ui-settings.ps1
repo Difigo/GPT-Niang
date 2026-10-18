@@ -116,6 +116,7 @@ function Initialize-WidgetSettingsMenu {
   $script:settingsMenuUi.Quote=Add-SettingsAction '换一句台词' {if($script:collapsed){Show-Quota};Switch-Scene 'quote'} -ReturnItem
   Add-SettingsAction '刷新额度' {Request-Refresh}
   Add-SettingsAction '编辑我的语录' {Open-QuoteEditor}
+  Add-SettingsAction '自动补充台词…' {Open-QuoteGenerationSettings}
   Add-SettingsDivider
   $script:settingsMenuUi.Display=Add-SettingsSubmenu '显示与位置' {
   $script:settingsMenuUi.Follow=Add-SettingsAction '仅在 Codex 窗口内' {Set-WidgetFollowHost $true;Update-WidgetSettingsMenu;Set-WidgetMenuBounds;Position-WidgetMenuToHost} -Checkable -ReturnItem
