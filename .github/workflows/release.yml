@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   windows:
+    if: github.repository == 'T7moris/GPT-Niang'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -54,6 +55,7 @@ jobs:
           path: dist/*-windows.zip
           if-no-files-found: error
   macos:
+    if: github.repository == 'T7moris/GPT-Niang'
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -94,7 +96,7 @@ jobs:
           path: dist/*-macos-universal.zip
           if-no-files-found: error
   publish:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.repository == 'T7moris/GPT-Niang' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -17,14 +17,16 @@ try{
   Assert (!$defaults.enabled -and $defaults.batchSize-eq 43 -and $defaults.threshold-eq 20) 'Fresh install is off with agreed defaults'
   $null=Save-WidgetQuotes $script:dataDir @('原有一','原有二')
   Write-WidgetQuoteJson (Join-Path $script:dataDir 'generated-quotes.json') @{quotes=@('新台词')}
+  $selection=Get-WidgetSelectionSettings $script:dataDir;$selection.includeGenerated=$false;$selection.preferred=0;$selection.shown=0;$selection.unseen=100;Save-WidgetSelectionSettings $script:dataDir $selection
   Register-WidgetQuoteShown $script:dataDir '原有一'
   Assert ((Read-WidgetQuoteHistory $script:dataDir).shown.Count-eq 1) 'Disabled feature still records display history'
-  foreach($i in 1..8){Assert ((Get-WidgetQuote $script:dataDir)-ne '新台词') 'Off excludes generated quotes'}
+  foreach($i in 1..8){Assert ((Get-WidgetQuote $script:dataDir)-ne '新台词') 'Independent source toggle excludes generated quotes'}
   Assert ((Read-WidgetQuoteHistory $script:dataDir).shown.Count-eq 1) 'Selecting a candidate alone does not mark it as shown'
   $defaults.enabled=$true;Save-WidgetGenerationSettings $script:dataDir $defaults
   $saved=[IO.File]::ReadAllText((Join-Path $script:dataDir 'quote-generation.json'))|ConvertFrom-Json
   Assert ($saved.PSObject.Properties.Name-ccontains 'batchSize') 'Settings use canonical shared JSON field names'
   Register-WidgetQuoteShown $script:dataDir '原有二'
+  $selection.includeGenerated=$true;Save-WidgetSelectionSettings $script:dataDir $selection
   Assert ((Get-WidgetQuote $script:dataDir)-eq '新台词') 'History from before enable excludes previously shown originals'
   Register-WidgetQuoteShown $script:dataDir '新台词'
   Assert ((Read-WidgetQuoteHistory $script:dataDir).shown.Count-eq 3) 'Generated quote display is recorded'
@@ -76,6 +78,7 @@ try{
   Restore-WidgetLibraryQuote $script:dataDir '新台词'
   Assert ((Get-WidgetQuoteLibrary $script:dataDir).deleted.Count-eq 0) 'Undo removes exclusion'
   $library=Get-WidgetQuoteLibrary $script:dataDir;$library.base=@();Save-WidgetQuoteLibrary $script:dataDir $library
+  $selection.includeGenerated=$false;Save-WidgetSelectionSettings $script:dataDir $selection
   Assert ((Get-WidgetQuoteSettings $script:dataDir).quotes.Count-eq 0) 'Intentionally empty resident pool does not fall back to built-ins'
   Assert ((Get-WidgetQuote $script:dataDir)-like '语录库存为空*') 'Empty library has a useful bubble message'
   $libraryEditor=Open-QuoteEditor -CheckOnly
@@ -88,10 +91,8 @@ try{
   Assert ((Get-WidgetQuoteLibrary $script:dataDir).base[0].preferred) 'Preferred survives editor save'
   $library=Get-WidgetQuoteLibrary $script:dataDir
   $library.base=@([pscustomobject]@{text='偏爱';weight=1;preferred=$true},[pscustomobject]@{text='普通';weight=1;preferred=$false},[pscustomobject]@{text='上一句';weight=1;preferred=$false});Save-WidgetQuoteLibrary $script:dataDir $library
-  $randomBefore=$script:widgetQuoteRandom;$script:widgetQuoteRandom=[Random]::new(5)
-  $script:widgetQuoteLastByDataDir[[IO.Path]::GetFullPath($script:dataDir)]='上一句'
-  Assert ((Get-WidgetQuote $script:dataDir)-eq '偏爱') 'Preferred changes the actual seeded draw among remaining candidates'
-  $script:widgetQuoteRandom=$randomBefore
+  $selection.preferred=100;$selection.unseen=0;Save-WidgetSelectionSettings $script:dataDir $selection
+  Assert ((Get-WidgetQuote $script:dataDir)-eq '偏爱') 'Preferred belongs to its own percentage class'
   if($PreviewDirectory){
     $libraryEditor.Opacity=0;$libraryEditor.Show();$libraryEditor.UpdateLayout()
     $content=$libraryEditor.Content;$content.Measure([Windows.Size]::new(700,530));$content.Arrange([Windows.Rect]::new(0,0,700,530));$content.UpdateLayout()

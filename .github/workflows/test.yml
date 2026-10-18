@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   windows:
+    if: github.repository == 'T7moris/GPT-Niang'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -30,6 +31,7 @@ jobs:
       - name: Verify Windows packaging
         run: python scripts/build-release.py
   macos:
+    if: github.repository == 'T7moris/GPT-Niang'
     runs-on: macos-latest
     timeout-minutes: 20
     steps:

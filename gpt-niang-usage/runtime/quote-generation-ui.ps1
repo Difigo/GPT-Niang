@@ -2,14 +2,13 @@ function Disable-WidgetQuoteGeneration {
   $settings=Get-WidgetGenerationSettings $script:dataDir
   $settings.enabled=$false
   Save-WidgetGenerationSettings $script:dataDir $settings
-  if(!$script:collapsed -and $script:bubbleMode-eq 'quote'){Switch-Scene 'quota'}
 }
 function Update-WidgetGenerationFeedback {
   if(!$script:generationEditor){return}
   $settings=Get-WidgetGenerationSettings $script:dataDir
   $base=Get-WidgetQuoteSettings $script:dataDir
   $generated=@(Get-WidgetGeneratedQuotes $script:dataDir)
-  $rows=@($base.quotes);if($settings.enabled){$rows+=@($generated)}
+  $rows=@($base.quotes)+@($generated)
   $history=Read-WidgetQuoteHistory $script:dataDir;$keys=@{};$unseen=0
   foreach($row in $rows){$key=Get-WidgetQuoteKey $row.text;if(!$keys.ContainsKey($key)){$keys[$key]=$true;if(!$history.shown.ContainsKey($key)){$unseen++}}}
   $status='已关闭，不会启动生成任务。'
@@ -28,7 +27,7 @@ function Update-WidgetGenerationFeedback {
     if($state.day-eq $day){$status+=' 今日任务 '+$state.attempts+'/'+$settings.maxDaily+' 次。'}
     $status+=' 累计任务 '+$state.totalAttempts+' 次。'
   }catch{}
-  $script:generationEditor.FindName('Inventory').Text='当前未展示 '+$unseen+' 句 · 保存的生成台词 '+$generated.Count+' 句。'
+  $script:generationEditor.FindName('Inventory').Text='补货统计：未展示库存 '+$unseen+' 句 · 保存的生成台词 '+$generated.Count+' 句。展示配比单独设置。'
   $script:generationEditor.FindName('Status').Text=$status
   Update-WidgetModelOptions
 }
@@ -95,7 +94,7 @@ function Open-QuoteGenerationSettings([switch]$CheckOnly) {
    <TextBlock Text="从官方 Codex 接口读取当前账号可用的文本模型。仅影响台词生成，不修改全局配置或当前聊天模型。右键“立刻生成”会消耗 token，绕过库存阈值、每日上限与调用间隔，但仍计次并更新库存和最近调用时间。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,14"/>
    <TextBlock Text="人设与台词规则（每批独立提供，可修改）"/><TextBox x:Name="Persona" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="190" Margin="0,5,0,8" Padding="8"/>
    <Button x:Name="PersonaDefault" Content="恢复默认人设与规则" HorizontalAlignment="Left" Padding="12,6"/>
-   <TextBlock Text="关闭后只展示原有语录，保留生成库存与历史。展示历史从新版首次运行就记录，与生成开关无关。取消不能撤回已经发生的额度消耗。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,14,0,0"/>
+   <TextBlock Text="关闭后停止创作；已有生成语录是否展示，由“编辑我的语录”的独立选项决定，默认仍展示。历史与轮换进度保留。取消不能撤回已经发生的额度消耗。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,14,0,0"/>
   </StackPanel></ScrollViewer>
  </DockPanel>
 </Window>
@@ -116,7 +115,6 @@ function Open-QuoteGenerationSettings([switch]$CheckOnly) {
       foreach($name in @('Threshold','BatchSize','MaxDaily','MinIntervalMinutes','Persona')){$value[$name]=$script:generationEditor.FindName($name).Text.Trim()}
       $value.model=[string]$script:generationEditor.FindName('Model').SelectedValue
       Save-WidgetGenerationSettings $script:dataDir $value
-      if(!$value.enabled -and !$script:collapsed -and $script:bubbleMode-eq 'quote'){Switch-Scene 'quota'}
       Update-WidgetGenerationFeedback;$script:generationEditor.FindName('Feedback').Text='已保存。库存、模型和调用限制将在后台检查时应用。'
     }catch{$script:generationEditor.FindName('Feedback').Text=$_.Exception.Message}
   })

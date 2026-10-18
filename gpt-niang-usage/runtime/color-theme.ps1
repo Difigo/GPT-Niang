@@ -7,10 +7,20 @@ $script:widgetColors=$null
 $script:widgetColorRandom=[Random]::new()
 $script:colorSpecialQuotes=@('Token来，Token来')
 $script:colorSceneScope='none';$script:colorSceneKey='';$script:colorSpecialLast=''
+$script:quoteInkRandom=[Random]::new()
+$script:quoteSceneInk=$null
 
 function Get-WidgetBubbleQuote([string]$DataDir){
   # Choose the text from its own pool before drawing an unrelated appearance.
   $text=Get-WidgetQuote $DataDir
+  $script:quoteSceneInk=$null
+  if((Get-WidgetSelectionSettings $DataDir).coloredText){
+    $palette=@(Get-WidgetColorPalette 'rainbow')
+    $color=[Windows.Media.ColorConverter]::ConvertFromString($palette[$script:quoteInkRandom.Next($palette.Count-1)])
+    # Darken against the lightest flowing surfaces without losing the hue.
+    $color=Mix-WidgetColor $color ([Windows.Media.ColorConverter]::ConvertFromString('#271938')) 0.60
+    $script:quoteSceneInk=[Windows.Media.SolidColorBrush]::new($color);$script:quoteSceneInk.Freeze()
+  }
   if($script:colorMode-ne 'mixed'){return $text}
   $roll=Get-WidgetColorRoll
   $scope=if($roll-lt ($script:colorChance/100.0)){'full'}elseif($roll-lt (($script:colorChance+$script:colorTextChance)/100.0)){'text'}else{'none'}
@@ -204,13 +214,14 @@ function Update-WidgetColorScene {
   if(!$text -and $script:bubbleMode-eq 'quote'){$text=$script:ui.QuoteText.Text}
   $script:widgetColors.scope=Get-WidgetColorScope $text
   $script:widgetColors.active=$script:widgetColors.scope-ne 'none'
-  if(!$script:widgetColors.active){Restore-WidgetOriginalColors;return}
+  if(!$script:widgetColors.active){Restore-WidgetOriginalColors;Set-WidgetQuoteSceneInk;return}
   $palette=if($script:colorMode-eq 'rainbow' -or $script:bubbleMode-ne 'quote'){'rainbow'}else{Resolve-WidgetColorPalette $text}
   Set-WidgetColorPalette $palette
   $accent=$script:widgetColors.brushes.accent;$surface=$script:widgetColors.brushes.surface;$ink=$script:widgetColors.brushes.ink
   if($script:widgetColors.scope-eq 'text'){
     Restore-WidgetOriginalColors -KeepAnimation
     $script:ui.QuoteText.Foreground=$ink
+    Set-WidgetQuoteSceneInk
     Set-WidgetColorAnimation ($script:window.IsVisible -and !$script:colorPaused)
     return
   }
@@ -227,7 +238,11 @@ function Update-WidgetColorScene {
   }
   $script:widgetColors.halo.Visibility=[Windows.Visibility]::Visible
   $script:widgetColors.tint.Visibility=[Windows.Visibility]::Visible
+  Set-WidgetQuoteSceneInk
   Set-WidgetColorAnimation ($script:window.IsVisible -and !$script:colorPaused)
+}
+function Set-WidgetQuoteSceneInk {
+  if($script:bubbleMode-eq 'quote' -and $script:quoteSceneInk){$script:ui.QuoteText.Foreground=$script:quoteSceneInk}
 }
 function Set-WidgetColorMode([ValidateSet('original','linked','rainbow','surprise','rare','special','mixed')][string]$Mode){
   $script:colorMode=$Mode

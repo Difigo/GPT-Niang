@@ -1,0 +1,77 @@
+name: Publish personal Windows release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: github.repository == 'Difigo/GPT-Niang'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Node runtime tests
+        working-directory: gpt-niang-usage
+        run: npm test
+      - name: Isolated installer executable fixture
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'gpt-niang-test-bin'
+          New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+          Copy-Item (Get-Command node.exe).Source (Join-Path $fixture 'codex.exe')
+          $fixture | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Windows behavior and installation tests
+        working-directory: gpt-niang-usage
+        run: npm run test:windows
+      - name: Build verified personal bundle
+        run: python scripts/build-release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: personal-windows
+          path: |
+            dist/*-windows.zip
+            dist/SHA256SUMS.txt
+            dist/release-notes.md
+          if-no-files-found: error
+  publish:
+    if: github.repository == 'Difigo/GPT-Niang' && github.ref == 'refs/heads/main'
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: personal-windows
+          path: dist
+      - name: Publish immutable version after all Windows checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import json; print(json.load(open("gpt-niang-usage/package.json"))["version"])')"
+          tag="v$version"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName > "$RUNNER_TEMP/releases.json"
+          if jq -e --arg tag "$tag" '.[] | select(.tagName == $tag)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+            echo "Release $tag already exists; increment the version to publish new code."
+            exit 0
+          fi
+          current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$current" = "$GITHUB_SHA" || { echo "Main changed during the build; refusing to publish stale code." >&2; exit 1; }
+          gh release create "$tag" "dist/gpt-niang-usage-widget-v$version-windows.zip" dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "GPT 娘个人版 $version · Windows" --notes-file dist/release-notes.md --draft
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest

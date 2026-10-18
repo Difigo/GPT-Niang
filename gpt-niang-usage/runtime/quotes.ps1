@@ -1,7 +1,7 @@
 ﻿# Local selection and history; attribution is in assets/quotes-LICENSE.txt. Optional generation runs in the worker.
 $script:widgetQuotesBuiltInPath=Join-Path $PSScriptRoot '..\assets\quotes.json'
 $script:widgetQuoteRandom=New-Object System.Random
-$script:widgetQuoteLastByDataDir=@{}
+$script:widgetQuotePending=@{}
 
 function ConvertTo-WidgetQuoteRows($Value) {
   if($null-eq $Value){return}
@@ -56,28 +56,7 @@ function Get-WidgetQuoteSettings([string]$DataDir) {
 }
 
 function Get-WidgetQuote([string]$DataDir) {
-  $settings=Get-WidgetQuoteSettings $DataDir
-  $generation=Get-WidgetGenerationSettings $DataDir
-  $rows=@($settings.quotes)
-  if($generation.enabled){
-    $rows+=@(Get-WidgetGeneratedQuotes $DataDir)
-    $seen=@{};$rows=@(foreach($row in $rows){$id=Get-WidgetQuoteKey $row.text;if(!$seen.ContainsKey($id)){$seen[$id]=$true;$row}})
-    $history=Read-WidgetQuoteHistory $DataDir
-    $unseen=@($rows|Where-Object{!$history.shown.ContainsKey((Get-WidgetQuoteKey $_.text))})
-    if($unseen.Count-gt 0){$rows=$unseen}
-  }
-  if($rows.Count-eq 0){return '语录库存为空，请在“编辑我的语录”中添加。'}
-  $rows=@(foreach($row in $rows){[pscustomobject]@{text=$row.text;weight=($row.weight*$(if($row.preferred){3}else{1}))}})
-  $key=[IO.Path]::GetFullPath($DataDir)
-  $last=$script:widgetQuoteLastByDataDir[$key]
-  $candidates=@($rows | Where-Object {![string]::Equals($_.text,$last,[StringComparison]::Ordinal)})
-  if($candidates.Count-eq 0){$candidates=$rows}
-  $total=0.0;foreach($entry in $candidates){$total+=$entry.weight}
-  $draw=$script:widgetQuoteRandom.NextDouble()*$total
-  $choice=$candidates[$candidates.Count-1]
-  foreach($entry in $candidates){$draw-=$entry.weight;if($draw-lt 0){$choice=$entry;break}}
-  $script:widgetQuoteLastByDataDir[$key]=$choice.text
-  [string]$choice.text
+  Get-WidgetSelectedQuote $DataDir
 }
 
 function Get-WidgetQuoteKey([string]$Text) {
@@ -94,11 +73,16 @@ function Write-WidgetQuoteJson([string]$Path,$Value) {
   }finally{if([IO.File]::Exists($temporary)){[IO.File]::Delete($temporary)}}
 }
 function Read-WidgetQuoteHistory([string]$DataDir) {
-  $history=@{version=1;startedAt=[DateTime]::UtcNow.ToString('o');shown=@{}}
+  $history=@{version=2;startedAt=[DateTime]::UtcNow.ToString('o');shown=@{};rotation=@{};lastKey=''}
   try{
     $saved=[IO.File]::ReadAllText((Join-Path $DataDir 'quote-history.json'),[Text.Encoding]::UTF8)|ConvertFrom-Json
     if($saved.startedAt){$history.startedAt=$saved.startedAt}
     foreach($property in $saved.shown.PSObject.Properties){if($property.Name-match '^[a-f0-9]{64}$'){$history.shown[$property.Name]=[string]$property.Value}}
+    foreach($group in @('preferred','shown','unseen')){
+      $value=$saved.rotation.$group
+      $history.rotation[$group]=@{members=@($value.members|Where-Object{$_-is [string] -and $_-match '^[a-f0-9]{64}$'});remaining=@($value.remaining|Where-Object{$_-is [string] -and $_-match '^[a-f0-9]{64}$'})}
+    }
+    if($saved.lastKey-match '^[a-f0-9]{64}$'){$history.lastKey=$saved.lastKey}
   }catch{}
   return $history
 }
@@ -107,10 +91,12 @@ function Initialize-WidgetQuoteHistory([string]$DataDir) {
 }
 function Register-WidgetQuoteShown([string]$DataDir,[string]$Text) {
   if(!$Text){return}
+  $directory=[IO.Path]::GetFullPath($DataDir)
+  if($script:widgetQuotePending.ContainsKey($directory) -and $script:widgetQuotePending[$directory].empty){$script:widgetQuotePending.Remove($directory);return}
   $history=Read-WidgetQuoteHistory $DataDir
   $id=Get-WidgetQuoteKey $Text
-  if($history.shown.ContainsKey($id)){return}
-  $history.shown[$id]=[DateTime]::UtcNow.ToString('o')
+  Complete-WidgetQuoteSelection $DataDir $id $history
+  if(!$history.shown.ContainsKey($id)){$history.shown[$id]=[DateTime]::UtcNow.ToString('o')}
   Write-WidgetQuoteJson (Join-Path $DataDir 'quote-history.json') $history
 }
 function Get-WidgetGenerationSettings([string]$DataDir) {
@@ -222,3 +208,5 @@ function Restore-WidgetLibraryQuote([string]$DataDir,[string]$Text) {
   if($row[0].source-eq 'base'){$library.base+=@($row[0])}
   Save-WidgetQuoteLibrary $DataDir $library
 }
+
+. (Join-Path $PSScriptRoot 'quote-selection.ps1')

@@ -7,6 +7,12 @@ function Update-WidgetQuoteEditor {
   $editor.FindName('Generated').ItemsSource=@(Get-WidgetGeneratedQuotes $script:dataDir)
   $editor.FindName('Deleted').ItemsSource=@($library.deleted)
   $editor.FindName('Counts').Text='常驻 '+$base.Count+' 句 · 生成 '+$editor.FindName('Generated').Items.Count+' 句 · 已删除 '+$library.deleted.Count+' 句'
+  $settings=Get-WidgetSelectionSettings $script:dataDir
+  foreach($name in @('preferred','shown','unseen')){$editor.FindName($name+'Ratio').Text=[string]$settings[$name]}
+  $editor.FindName('IncludeGenerated').IsChecked=$settings.includeGenerated
+  $editor.FindName('ColoredText').IsChecked=$settings.coloredText
+  $pools=Get-WidgetSelectionPools $script:dataDir $settings (Read-WidgetQuoteHistory $script:dataDir)
+  $editor.FindName('PoolCounts').Text='当前候选：preferred '+$pools.preferred.Count+' · 已展示 '+$pools.shown.Count+' · 未展示 '+$pools.unseen.Count+'。空类按其余非零类的比例分配。'
 }
 function Save-WidgetQuoteEditorBase {
   $grid=$script:quoteEditor.FindName('Base')
@@ -19,6 +25,9 @@ function Save-WidgetQuoteEditorBase {
     $row
   })
   $library=Get-WidgetQuoteLibrary $script:dataDir;$library.base=$rows
+  $selection=@{includeGenerated=[bool]$script:quoteEditor.FindName('IncludeGenerated').IsChecked;coloredText=[bool]$script:quoteEditor.FindName('ColoredText').IsChecked}
+  foreach($name in @('preferred','shown','unseen')){$selection[$name]=$script:quoteEditor.FindName($name+'Ratio').Text.Trim()}
+  Save-WidgetSelectionSettings $script:dataDir $selection
   Save-WidgetQuoteLibrary $script:dataDir $library
 }
 function Invoke-WidgetQuoteEditorAction([string]$Action) {
@@ -43,20 +52,27 @@ function Invoke-WidgetQuoteEditorAction([string]$Action) {
       'Defaults' {$null=Reset-WidgetQuotes $script:dataDir}
     }
     Update-WidgetQuoteEditor
-    $editor.FindName('Feedback').Text='已保存。preferred 在候选池内按原权重的 3 倍抽取；开启生成时仍优先未展示台词。'
+    $editor.FindName('Feedback').Text='已保存。先按占比选类别，再在类内随机轮换；进度随实际展示保存。占比优先，单句类别允许连续出现。'
   }catch{$script:quoteEditor.FindName('Feedback').Text=$_.Exception.Message}
 }
 function Open-QuoteEditor([switch]$CheckOnly) {
   if($script:quoteEditor -and $script:quoteEditor.IsVisible){$script:quoteEditor.Activate()|Out-Null;return}
   $editor=[Windows.Markup.XamlReader]::Parse(@'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="GPT 娘 · 我的语录" Width="740" Height="600" MinWidth="560" MinHeight="420" ShowInTaskbar="False" FontFamily="Microsoft YaHei UI" FontSize="14" Background="#FAF8FD" WindowStartupLocation="CenterOwner">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="GPT 娘 · 我的语录" Width="740" Height="740" MinWidth="620" MinHeight="560" ShowInTaskbar="False" FontFamily="Microsoft YaHei UI" FontSize="14" Background="#FAF8FD" WindowStartupLocation="CenterOwner">
  <DockPanel Margin="20" Background="#FAF8FD">
-  <StackPanel DockPanel.Dock="Top"><TextBlock x:Name="Counts" FontWeight="Bold" Margin="0,0,0,8"/><TextBlock Text="常驻语录关闭生成后仍会出现。生成语录可移入常驻；删除后可恢复，且不会再次生成相同句子。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,12"/></StackPanel>
+  <StackPanel DockPanel.Dock="Top"><TextBlock x:Name="Counts" FontWeight="Bold" Margin="0,0,0,8"/>
+   <TextBlock Text="按类别占比抽取，类内每轮随机排序、每句一次。preferred 独立成类；其余按实际展示历史分类。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,8"/>
+   <WrapPanel VerticalAlignment="Center" Margin="0,0,0,8"><TextBlock Text="preferred" VerticalAlignment="Center"/><TextBox x:Name="preferredRatio" Width="48" Padding="5,3" Margin="6,0,4,0"/><TextBlock Text="%   已展示" VerticalAlignment="Center"/><TextBox x:Name="shownRatio" Width="48" Padding="5,3" Margin="6,0,4,0"/><TextBlock Text="%   未展示" VerticalAlignment="Center"/><TextBox x:Name="unseenRatio" Width="48" Padding="5,3" Margin="6,0,4,0"/><TextBlock Text="%（合计 100%，0% 不抽取）" VerticalAlignment="Center"/></WrapPanel>
+   <CheckBox x:Name="IncludeGenerated" Content="已有生成语录参与展示（独立于生成开关）" Margin="0,0,0,8"/>
+   <CheckBox x:Name="ColoredText" Content="每次换句使用挂件配色的彩色文字" Margin="0,0,0,8"/>
+   <TextBlock x:Name="PoolCounts" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,8"/>
+   <TextBlock Text="生成语录可移入常驻后设为 preferred。删除后可恢复，并阻止相同句子再次入库。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,12"/>
+  </StackPanel>
   <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0"><TextBlock x:Name="Feedback" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,10"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button x:Name="Save" Content="保存 / 刷新列表" Padding="12,6" Margin="0,0,10,0"/><Button x:Name="Done" Content="关闭" Padding="18,6"/></StackPanel></StackPanel>
   <TabControl>
    <TabItem Header="常驻语录"><DockPanel Margin="10">
     <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0"><DockPanel><Button x:Name="Add" Content="添加" DockPanel.Dock="Right" Padding="12,5" Margin="8,0,0,0"/><TextBox x:Name="NewText" MaxLength="200" Padding="6,5" ToolTip="填写新语录"/></DockPanel><StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Button x:Name="DeleteBase" Content="删除选中语录" Padding="10,5"/><Button x:Name="Defaults" Content="恢复内置语录" Padding="10,5" Margin="8,0,0,0"/></StackPanel></StackPanel>
-    <DataGrid x:Name="Base" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" SelectionMode="Extended" SelectionUnit="FullRow" EnableRowVirtualization="True"><DataGrid.Columns><DataGridCheckBoxColumn Header="preferred" Binding="{Binding preferred}" Width="85"/><DataGridTextColumn Header="台词（双击编辑）" Binding="{Binding text}" Width="*" MinWidth="240"/><DataGridTextColumn Header="权重" Binding="{Binding weight}" Width="65"/></DataGrid.Columns></DataGrid>
+    <DataGrid x:Name="Base" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" SelectionMode="Extended" SelectionUnit="FullRow" EnableRowVirtualization="True"><DataGrid.Columns><DataGridCheckBoxColumn Header="preferred" Binding="{Binding preferred}" Width="85"/><DataGridTextColumn Header="台词（双击编辑）" Binding="{Binding text}" Width="*" MinWidth="240"/></DataGrid.Columns></DataGrid>
    </DockPanel></TabItem>
    <TabItem Header="生成语录"><DockPanel Margin="10"><StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0"><Button x:Name="Promote" Content="移入常驻语录" Padding="12,6"/><Button x:Name="DeleteGenerated" Content="删除选中语录" Padding="12,6" Margin="8,0,0,0"/></StackPanel><DataGrid x:Name="Generated" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended" SelectionUnit="FullRow"><DataGrid.Columns><DataGridTextColumn Header="台词" Binding="{Binding text}" Width="*"/></DataGrid.Columns></DataGrid></DockPanel></TabItem>
    <TabItem Header="已删除"><DockPanel Margin="10"><Button x:Name="Restore" Content="恢复选中语录" DockPanel.Dock="Bottom" HorizontalAlignment="Left" Padding="12,6" Margin="0,10,0,0"/><DataGrid x:Name="Deleted" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended" SelectionUnit="FullRow"><DataGrid.Columns><DataGridTextColumn Header="台词" Binding="{Binding text}" Width="*"/></DataGrid.Columns></DataGrid></DockPanel></TabItem>

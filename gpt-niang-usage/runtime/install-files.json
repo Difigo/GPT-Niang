@@ -9,5 +9,5 @@
   "runtime/update-agent.ps1", "runtime/update-common.ps1", "runtime/install-preflight.ps1", "runtime/install-files.json",
   "runtime/agent-launch.vbs", "runtime/agent-supervisor.vbs", "runtime/update-lock.ps1", ".mcp.json", ".codex-plugin/plugin.json", "package.json", "Install.ps1", "Uninstall.ps1",
   "assets/quote-persona.txt", "runtime/quote-generation-ui.ps1",
-  "runtime/quote-generation.mjs", "runtime/quote-codex.mjs", "runtime/quote-exec.mjs", "runtime/quote-layout.cs"
+  "runtime/quote-generation.mjs", "runtime/quote-codex.mjs", "runtime/quote-exec.mjs", "runtime/quote-layout.cs", "runtime/quote-selection.ps1"
 ]
