@@ -6,10 +6,16 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {fileURLToPath} from 'node:url';
-import {createCodexQuoteGenerator} from '../runtime/quote-codex.mjs';
+import {createCodexQuoteGenerator,createCodexModelReader} from '../runtime/quote-codex.mjs';
 import {generationDefaults} from '../runtime/quote-generation.mjs';
 import {atomicJson} from '../runtime/usage.mjs';
 const preload=new URL('./fixtures/quote-cli.mjs',import.meta.url).href;
+test('model discovery follows pagination and filters hidden/non-text models without a generation',async()=>{
+  const read=createCodexModelReader({codexPath:process.execPath},{env:{...process.env,NODE_OPTIONS:'--import='+preload}});
+  const result=await read();
+  assert.equal(result.model,'configured-test-model');
+  assert.deepEqual(result.models.map(row=>row.id),['first','second']);
+});
 function fixture(t,overrides={}){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'gpt-niang-cli-test-')),trace=path.join(dir,'trace.json');
   t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));

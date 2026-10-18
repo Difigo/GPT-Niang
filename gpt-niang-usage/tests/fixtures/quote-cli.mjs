@@ -12,7 +12,8 @@ if(['exec','features','app-server'].includes(command)){
     const input=readline.createInterface({input:process.stdin});
     input.on('line',line=>{
       const q=JSON.parse(line);if(q.id===undefined)return;
-      const result=q.id===1?{}:q.id===2?{account:{type:process.env.QUOTE_TEST_AUTH??'chatgpt'}}:{config:{model:'configured-test-model',model_provider:'openai'}};
+      let result=q.id===1?{}:q.id===2?{account:{type:process.env.QUOTE_TEST_AUTH??'chatgpt'}}:{config:{model:'configured-test-model',model_provider:'openai'}};
+      if(q.method==='model/list')result=q.params.cursor?{data:[{model:'second',displayName:'Second',inputModalities:['text']},{model:'audio',inputModalities:['audio']}],nextCursor:null}:{data:[{model:'first',displayName:'First',isDefault:true,inputModalities:['text']},{model:'hidden',hidden:true}],nextCursor:'next'};
       console.log(JSON.stringify({id:q.id,result}));
     });input.on('close',()=>process.exit(0));
   }

@@ -26,14 +26,20 @@ export function quoteRows(value) {
     const weight=typeof row==='string'?1:(row?.weight??1);
     if(typeof text!=='string' || !text || text.length>200 || /[\x00-\x08\x0B\x0C\x0E-\x1F]/u.test(text) || !Number.isFinite(weight) || weight<=0 || weight>1000)continue;
     const key=quoteKey(text);
-    if(!keys.has(key)){keys.add(key);result.push({text,weight});}
+    if(!keys.has(key)){keys.add(key);result.push({text,weight,...(row?.preferred===true?{preferred:true}:{})});}
   }
   return result;
 }
 export function readQuoteInventory(dataDir,builtIn) {
-  let base=quoteRows(readJson(path.join(dataDir,'quotes.json')));
-  if(!base.length)base=quoteRows(readJson(builtIn));
-  return {base,generated:quoteRows(readJson(path.join(dataDir,'generated-quotes.json'))),shown:readJson(path.join(dataDir,'quote-history.json'))?.shown??{}};
+  const library=readJson(path.join(dataDir,'quote-library.json'));
+  const legacy=readJson(path.join(dataDir,'quotes.json'));
+  let base=quoteRows(Array.isArray(library?.base)?library.base:legacy);
+  if(!Array.isArray(library?.base) && !Array.isArray(legacy?.quotes) && !Array.isArray(legacy))base=quoteRows(readJson(builtIn));
+  const deleted=quoteRows(library?.deleted??[]),excluded=new Set(deleted.map(row=>quoteKey(row.text)));
+  base=base.filter(row=>!excluded.has(quoteKey(row.text)));
+  const baseKeys=new Set(base.map(row=>quoteKey(row.text)));
+  const generated=quoteRows(readJson(path.join(dataDir,'generated-quotes.json'))).filter(row=>!excluded.has(quoteKey(row.text)) && !baseKeys.has(quoteKey(row.text)));
+  return {base,generated,deleted,shown:readJson(path.join(dataDir,'quote-history.json'))?.shown??{}};
 }
 export function unseenQuotes(inventory) {
   return quoteRows([...inventory.base,...inventory.generated]).filter(row=>!Object.hasOwn(inventory.shown,quoteKey(row.text)));
@@ -69,22 +75,29 @@ export function createQuoteReplenisher({dataDir,builtIn,generate,clock=Date.now,
   function tick({visible=false,ownerPid=null}={}) {
     if(closed)return;
     const config=settings(),now=clock();
+    const request=readJson(path.join(dataDir,'quote-generation-request.json'));
+    const previous=readJson(stateFile)??{},day=localDay(now);
+    if(fs.existsSync(stateFile) && !readJson(stateFile))return;
+    const pending=typeof request?.id==='string' && request.id!==previous.handledRequest;
+    let manual=false;
+    if(pending){
+      manual=!active && config.enabled && visible && request.revision===config.revision && now-request.at>=0 && now-request.at<60000;
+      try{publish({handledRequest:request.id,requestStatus:manual?'accepted':active?'busy':'cancelled'});}catch{return;}
+    }
     if(active){
       if(!config.enabled || config.revision!==active.revision || !visible || ownerPid!==active.ownerPid)cancel();
       return active.promise;
     }
     if(platform!=='win32' || !config.enabled || !visible)return;
-    const previous=readJson(stateFile)??{},day=localDay(now);
-    if(fs.existsSync(stateFile) && !readJson(stateFile))return;
     // A backwards clock must not reset the cap or bypass the cooldown.
     const count=typeof previous.day==='string' && previous.day>=day?(previous.attempts??0):0;
-    if(count>=config.maxDaily || (Number.isFinite(previous.lastAttempt) && now-previous.lastAttempt<config.minIntervalMinutes*60000))return;
+    if(!manual && (count>=config.maxDaily || (Number.isFinite(previous.lastAttempt) && now-previous.lastAttempt<config.minIntervalMinutes*60000)))return;
     const inventory=readQuoteInventory(dataDir,builtIn);
-    if(unseenQuotes(inventory).length>=config.threshold)return;
+    if(!manual && unseenQuotes(inventory).length>=config.threshold)return;
     const controller=new AbortController(),job={controller,revision:config.revision,ownerPid,promise:null};
     active=job;
     // Reserve before touching the model: failures, cancellation and restarts count.
-    try{publish({day:previous.day>day?previous.day:day,attempts:count+1,lastAttempt:now,status:'generating',added:0});}
+    try{publish({day:previous.day>day?previous.day:day,attempts:count+1,totalAttempts:(previous.totalAttempts??previous.attempts??0)+1,lastAttempt:now,status:'generating',trigger:manual?'manual':'automatic',added:0,error:null});}
     catch{active=null;return;}
     const poll=setInterval(()=>{
       const latest=settings();
@@ -97,10 +110,13 @@ export function createQuoteReplenisher({dataDir,builtIn,generate,clock=Date.now,
         const latest=settings();
         if(closed || controller.signal.aborted || !latest.enabled || latest.revision!==job.revision){publish({status:'cancelled'});return;}
         const current=readQuoteInventory(dataDir,builtIn);
-        const rows=validateGeneratedQuotes(result,[...current.base,...current.generated],config.batchSize);
+        const rows=validateGeneratedQuotes(result,[...current.base,...current.generated,...current.deleted],config.batchSize);
         if(!rows.length)throw new Error('NO_VALID_QUOTES');
-        atomicJson(path.join(dataDir,'generated-quotes.json'),{version:1,quotes:[...current.generated,...rows]});
-        publish({status:'ready',added:rows.length});
+        // Keep the raw archive append-only. UI curation overlays it, so a move,
+        // deletion or undo during generation cannot be overwritten by this writer.
+        const archive=quoteRows(readJson(path.join(dataDir,'generated-quotes.json')));
+        atomicJson(path.join(dataDir,'generated-quotes.json'),{version:1,quotes:[...archive,...rows]});
+        publish({status:'ready',added:rows.length,totalAdded:(readJson(stateFile)?.totalAdded??0)+rows.length});
       }catch(error){
         // Do not persist model stderr, prompts, account details or arbitrary errors.
         publish({status:controller.signal.aborted?'cancelled':'failed',error:controller.signal.aborted?null:(error?.code==='AUTH_REQUIRED'?'AUTH_REQUIRED':'GENERATION_FAILED')});

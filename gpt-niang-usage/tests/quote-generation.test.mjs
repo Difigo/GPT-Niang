@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {atomicJson} from '../runtime/usage.mjs';
 import {readJson} from '../runtime/worker-state.mjs';
-import {createQuoteReplenisher,generationDefaults,normalizeGenerationSettings,quoteKey,unseenQuotes,validateGeneratedQuotes} from '../runtime/quote-generation.mjs';
+import {createQuoteReplenisher,generationDefaults,normalizeGenerationSettings,quoteKey,unseenQuotes,validateGeneratedQuotes,readQuoteInventory} from '../runtime/quote-generation.mjs';
 
 function setup(t,generate=async()=>({quotes:['新台词来了。']})){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'gpt-niang-quote-test-'));
@@ -17,6 +17,7 @@ function setup(t,generate=async()=>({quotes:['新台词来了。']})){
   t.after(()=>{engine.close();fs.rmSync(dir,{recursive:true,force:true});});
   return {dir,dataDir,builtIn,engine,options,get calls(){return calls;},advance(ms){now+=ms;},
     enable(patch={}){atomicJson(path.join(dataDir,'quote-generation.json'),{...generationDefaults,enabled:true,revision:'first',...patch});},
+    manual(id='manual'){atomicJson(path.join(dataDir,'quote-generation-request.json'),{id,revision:'first',at:now});},
     state(){return readJson(path.join(dataDir,'quote-generation-state.json'));},
     stock(){return readJson(path.join(dataDir,'generated-quotes.json'));}};
 }
@@ -28,6 +29,36 @@ test('missing/malformed/disabled settings and hidden hosts never start model cal
   f.enable();await f.engine.tick({visible:false});assert.equal(f.calls,0);
   const mac=createQuoteReplenisher({...f.options,platform:'darwin'});
   await mac.tick({visible:true});mac.close();assert.equal(f.calls,0);
+});
+test('manual bypasses all three automatic gates, updates budget/cooldown, and is consumed once',async t=>{
+  const f=setup(t);f.enable({threshold:1,maxDaily:1});
+  await f.engine.tick({visible:true});assert.equal(f.calls,0);
+  f.manual();await f.engine.tick({visible:true});assert.equal(f.calls,1);
+  assert.equal(f.state().attempts,1);assert.equal(f.state().totalAttempts,1);assert.equal(f.state().trigger,'manual');
+  f.manual('second');await f.engine.tick({visible:true});assert.equal(f.calls,2);
+  assert.equal(f.state().attempts,2);assert.equal(f.state().totalAttempts,2);
+  await f.engine.tick({visible:true});assert.equal(f.calls,2);
+  assert.equal(f.state().lastAttempt,new Date(2026,9,18,12).getTime());
+  f.enable({threshold:100,maxDaily:100});await f.engine.tick({visible:true});assert.equal(f.calls,2,'manual calls start the automatic cooldown');
+});
+test('disabled, stale and old-revision manual requests never queue for a later enable',async t=>{
+  const f=setup(t);f.enable({enabled:false});f.manual();await f.engine.tick({visible:true});
+  f.enable({threshold:1});await f.engine.tick({visible:true});assert.equal(f.calls,0);
+  f.manual('expired');f.advance(60001);await f.engine.tick({visible:true});assert.equal(f.calls,0);
+  f.manual('old');f.enable({revision:'new',threshold:1});await f.engine.tick({visible:true});assert.equal(f.calls,0);
+});
+test('curation during generation preserves deleted/moved archive, suppresses regeneration and allows empty base',async t=>{
+  let finish;
+  const f=setup(t,()=>new Promise(resolve=>{finish=resolve;}));f.enable();
+  atomicJson(path.join(f.dataDir,'generated-quotes.json'),{quotes:['移入常驻','讨厌的台词']});
+  const job=f.engine.tick({visible:true});
+  atomicJson(path.join(f.dataDir,'quote-library.json'),{base:[{text:'移入常驻',weight:2,preferred:true}],deleted:[{text:'讨厌的台词',source:'generated'}]});
+  finish({quotes:['讨厌的台词','移入常驻','新句子']});await job;
+  assert.equal(f.stock().quotes.length,3,'archive retained for undo');
+  const inventory=readQuoteInventory(f.dataDir,f.builtIn);
+  assert.deepEqual(inventory.generated.map(x=>x.text),['新句子']);assert.equal(inventory.base[0].preferred,true);
+  atomicJson(path.join(f.dataDir,'quote-library.json'),{base:[],deleted:[]});
+  assert.deepEqual(readQuoteInventory(f.dataDir,f.builtIn).base,[]);
 });
 test('threshold, 43 default, unseen history and custom list remain separate',async t=>{
   let requested;

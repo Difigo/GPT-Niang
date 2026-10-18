@@ -26,9 +26,9 @@ function guardedProcess(cli,args,{env,rpc=false}={}) {
   child.stdin.write(JSON.stringify({cli,args,rpc})+'\n');
   return child;
 }
-export function readGenerationContext(cli,{signal,env=generationEnvironment(),timeoutMs=15000}={}) {
+export function readGenerationContext(cli,{signal,env=generationEnvironment(),timeoutMs=15000,listModels=false}={}) {
   return new Promise((resolve,reject)=>{
-    let child,lines,done=false,account;
+    let child,lines,done=false,account,context,models=[],cursors=new Set(),pages=0;
     const finish=(error,value)=>{
       if(done)return;done=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);lines?.close();
       stopProcessTree(child);error?reject(error):resolve(value);
@@ -57,11 +57,31 @@ export function readGenerationContext(cli,{signal,env=generationEnvironment(),ti
       if(message.id===3){
         const config=message.result?.config;
         if(!config || (config.model_provider && config.model_provider!=='openai')){finish(failure('AUTH_REQUIRED'));return;}
-        finish(null,{model:typeof config.model==='string'?config.model:null});
+        context={model:typeof config.model==='string'?config.model:null};
+        if(!listModels){finish(null,context);return;}
+        send({id:4,method:'model/list',params:{limit:100,includeHidden:false}});
+      }
+      if(message.id===4){
+        const result=message.result;
+        if(!Array.isArray(result?.data)){finish(failure('CODEX_UNAVAILABLE'));return;}
+        for(const item of result.data){
+          const id=item.model??item.id;
+          if(typeof id!=='string' || !/^[A-Za-z0-9._:/-]{1,160}$/.test(id) || item.hidden===true || (Array.isArray(item.inputModalities) && !item.inputModalities.includes('text')))continue;
+          if(!models.some(row=>row.id===id))models.push({id,label:typeof item.displayName==='string'?item.displayName.slice(0,160):id,isDefault:item.isDefault===true});
+        }
+        const cursor=result.nextCursor;
+        if(cursor){
+          if(typeof cursor!=='string' || cursors.has(cursor) || ++pages>100){finish(failure('CODEX_UNAVAILABLE'));return;}
+          cursors.add(cursor);send({id:4,method:'model/list',params:{limit:100,includeHidden:false,cursor}});
+        }else finish(null,{...context,models});
       }
     });
     send({id:1,method:'initialize',params:{clientInfo:{name:'gpt_niang_quotes',version:'1.0.0'}}});
   });
+}
+// Model discovery is metadata only; it does not start a model turn.
+export function createCodexModelReader(config,{env=process.env}={}) {
+  return ()=>readGenerationContext(resolveCodexExecutable(config.codexPath),{env:generationEnvironment(env),listModels:true});
 }
 function capture(cli,args,{signal,env,timeoutMs=15000}={}) {
   return new Promise((resolve,reject)=>{
