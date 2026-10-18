@@ -37,6 +37,8 @@ jobs:
         run: npm run test:windows
       - name: Build verified personal bundle
         run: python scripts/build-release.py
+      - name: Verify actual bundle against in-place updater ownership
+        run: node scripts/verify-windows-release.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: personal-windows

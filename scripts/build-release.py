@@ -24,7 +24,10 @@ credits = (root / 'README.md').read_text(encoding='utf-8-sig').split('## 致谢�
 tracked = subprocess.check_output(
     ["git", "ls-files", "-z"], cwd=root
 ).decode("utf-8").split("\0")
-files = sorted(p for p in tracked if p and not p.startswith((".github/", "scripts/", ".codex/", "macos/", "script/")))
+# Development docs are not managed installation files. Including a new docs/
+# tree makes an existing legacy docs directory look like a personal-file
+# collision during an otherwise valid in-place update.
+files = sorted(p for p in tracked if p and p not in {"GLOSSARY.md", "GLOSSARY-MAP.md"} and not p.startswith((".github/", "scripts/", ".codex/", "macos/", "script/", "docs/")))
 required = {
     "LICENSE", "gpt-niang-usage/LICENSE",
     "gpt-niang-usage/assets/CHARACTER-NOTICE.txt",
