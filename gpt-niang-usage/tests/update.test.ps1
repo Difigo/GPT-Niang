@@ -1,4 +1,4 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 $source=Split-Path $PSScriptRoot -Parent
 # Dot source into this test scope; no task/shortcut/CLI installation is performed.
 . (Join-Path $source 'runtime\update-helper.ps1') -FunctionsOnly
@@ -80,6 +80,12 @@ function New-Fixture([string]$Name,[switch]$Embedded) {
 try {
   $hashFile=Join-Path $testRoot 'sha-test.txt';[IO.File]::WriteAllText($hashFile,'abc')
   Assert ((Get-WidgetFileHash $hashFile)-eq 'BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD') 'SHA256 works without Get-FileHash module autoload'
+  $encodingRoot=Join-Path $testRoot 'unicode-managed-root';$encodingNext=Join-Path $testRoot 'unicode-managed-next'
+  $null=New-Item -ItemType Directory -Path $encodingRoot,$encodingNext -Force
+  [IO.File]::WriteAllText((Join-Path $encodingRoot '停用GPT娘.cmd'),'old managed launcher')
+  [IO.File]::WriteAllText((Join-Path $encodingNext '停用GPT娘.cmd'),'new managed launcher')
+  Copy-WidgetUnmanagedRootItems ([pscustomobject]@{root=$encodingRoot;nextRoot=$encodingNext;dataDir=(Join-Path $testRoot 'unicode-state')})
+  Assert ([IO.File]::ReadAllText((Join-Path $encodingNext '停用GPT娘.cmd'))-eq 'new managed launcher') 'Windows PowerShell native file loading recognizes Chinese managed launcher names'
   $journal=New-Fixture 'upgrade'
   [IO.File]::WriteAllText((Join-Path $journal.root 'screenshot.png'),'personal screenshot')
   $personal=Join-Path $journal.root 'my downloads';$null=New-Item -ItemType Directory -Path $personal

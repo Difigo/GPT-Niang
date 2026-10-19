@@ -1,12 +1,12 @@
 # GPT-Niang（GPT 娘）· Difigo Windows 个人版
 
-本仓库维护 **Windows 个人版 1.4.1**，基于 [T7moris/GPT-Niang](https://github.com/T7moris/GPT-Niang) 的开源项目。Windows 更新器仅跟随本仓库的 Releases；上游改进通过 Git 选择合入。macOS 部分保留上游源码与说明，本个人版暂不发布 macOS 安装包。
+本仓库维护 **Windows 个人版 1.4.2**，基于 [T7moris/GPT-Niang](https://github.com/T7moris/GPT-Niang) 的开源项目。Windows 更新器仅跟随本仓库的 Releases；上游改进通过 Git 选择合入。macOS 部分保留上游源码与说明，本个人版暂不发布 macOS 安装包。
 
 新增三类语录占比（preferred / 已展示 / 未展示，默认 40% / 20% / 40%）、实际展示后保存的组内轮换、每次换句的静态彩色文字。生成开关只控制创作，已有生成语录默认仍参与展示，两个设置相互独立。操作入口为右键「编辑我的语录」。
 
 让一只白发紫瞳的小龙娘，陪你看 Codex 的剩余额度。
 
-**Windows 个人版 1.4.1 · 自动识别套餐与额度窗口 · 中文语录 · macOS 请参考上游版本**
+**Windows 个人版 1.4.2 · 自动识别套餐与额度窗口 · 中文语录 · macOS 请参考上游版本**
 
 1.3.4 按 PR #20 的只移动窗口方案整合 Windows DPI 修复，并补齐 Business 个人额度的双平台兼容。交互以 Windows 为基准：Mac 连续点击不再打开设置，支持相同的大小范围、桌面置顶开关和独立位置保存；保留 SwiftUI／AppKit 原生实现及双平台自动更新、回滚与历史版本清理。
 
