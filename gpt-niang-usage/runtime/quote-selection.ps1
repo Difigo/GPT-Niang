@@ -74,7 +74,7 @@ function Get-WidgetSelectedQuote([string]$DataDir) {
   if($id-eq $history.lastKey -and $round.remaining.Count-gt 1){$round.remaining[0]=$round.remaining[1];$round.remaining[1]=$id;$id=$round.remaining[0]}
   $row=@($pools[$chosen]|Where-Object{$_.key-eq $id})[0]
   $round.remaining=@($round.remaining|Select-Object -Skip 1)
-  $script:widgetQuotePending[$directory]=@{key=$id;rotation=$rotation}
+  $script:widgetQuotePending[$directory]=@{key=$id;group=$chosen;rotation=$rotation}
   return [string]$row.text
 }
 function Complete-WidgetQuoteSelection([string]$DataDir,[string]$Key,$History) {

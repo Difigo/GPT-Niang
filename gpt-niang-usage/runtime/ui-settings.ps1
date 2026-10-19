@@ -64,7 +64,7 @@ function Open-QuoteEditor([switch]$CheckOnly) {
    <TextBlock Text="按类别占比抽取，类内每轮随机排序、每句一次。preferred 独立成类；其余按实际展示历史分类。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,8"/>
    <WrapPanel VerticalAlignment="Center" Margin="0,0,0,8"><TextBlock Text="preferred" VerticalAlignment="Center"/><TextBox x:Name="preferredRatio" Width="48" Padding="5,3" Margin="6,0,4,0"/><TextBlock Text="%   已展示" VerticalAlignment="Center"/><TextBox x:Name="shownRatio" Width="48" Padding="5,3" Margin="6,0,4,0"/><TextBlock Text="%   未展示" VerticalAlignment="Center"/><TextBox x:Name="unseenRatio" Width="48" Padding="5,3" Margin="6,0,4,0"/><TextBlock Text="%（合计 100%，0% 不抽取）" VerticalAlignment="Center"/></WrapPanel>
    <CheckBox x:Name="IncludeGenerated" Content="已有生成语录参与展示（独立于生成开关）" Margin="0,0,0,8"/>
-   <CheckBox x:Name="ColoredText" Content="每次换句使用挂件配色的彩色文字" Margin="0,0,0,8"/>
+   <CheckBox x:Name="ColoredText" Content="分类配色：preferred 紫色 · 已展示黑色 · 未展示流动彩虹" Margin="0,0,0,8"/>
    <TextBlock x:Name="PoolCounts" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,8"/>
    <TextBlock Text="生成语录可移入常驻后设为 preferred。删除后可恢复，并阻止相同句子再次入库。" TextWrapping="Wrap" Foreground="#745A98" Margin="0,0,0,12"/>
   </StackPanel>

@@ -7,19 +7,18 @@ $script:widgetColors=$null
 $script:widgetColorRandom=[Random]::new()
 $script:colorSpecialQuotes=@('Token来，Token来')
 $script:colorSceneScope='none';$script:colorSceneKey='';$script:colorSpecialLast=''
-$script:quoteInkRandom=[Random]::new()
 $script:quoteSceneInk=$null
+$script:quoteSceneGroup=''
 
 function Get-WidgetBubbleQuote([string]$DataDir){
-  # Choose the text from its own pool before drawing an unrelated appearance.
+  # Snapshot its selected class before actual display records it as shown.
   $text=Get-WidgetQuote $DataDir
-  $script:quoteSceneInk=$null
+  $script:quoteSceneInk=$null;$script:quoteSceneGroup=''
   if((Get-WidgetSelectionSettings $DataDir).coloredText){
-    $palette=@(Get-WidgetColorPalette 'rainbow')
-    $color=[Windows.Media.ColorConverter]::ConvertFromString($palette[$script:quoteInkRandom.Next($palette.Count-1)])
-    # Darken against the lightest flowing surfaces without losing the hue.
-    $color=Mix-WidgetColor $color ([Windows.Media.ColorConverter]::ConvertFromString('#271938')) 0.60
-    $script:quoteSceneInk=[Windows.Media.SolidColorBrush]::new($color);$script:quoteSceneInk.Freeze()
+    $pending=$script:widgetQuotePending[[IO.Path]::GetFullPath($DataDir)]
+    if($pending -and !$pending.empty){$script:quoteSceneGroup=$pending.group}
+    $hex=switch($script:quoteSceneGroup){'preferred'{'#745A98'};'shown'{'#000000'}}
+    if($hex){$script:quoteSceneInk=[Windows.Media.BrushConverter]::new().ConvertFromString($hex);$script:quoteSceneInk.Freeze()}
   }
   if($script:colorMode-ne 'mixed'){return $text}
   $roll=Get-WidgetColorRoll
@@ -157,12 +156,14 @@ function Set-WidgetColorAnimation([bool]$Running){
 function Set-WidgetColorPalette([string]$Name,[switch]$Immediate){
   if($script:widgetColors.palette-eq $Name -and !$Immediate){return}
   $keys=@(Get-WidgetColorPalette $Name | ForEach-Object {[Windows.Media.ColorConverter]::ConvertFromString($_)})
-  foreach($role in @('accent','ink','surface')){
+  foreach($role in @('accent','ink','surface','quoteInk')){
+    # Quote classification always uses rainbow, independent of scene keywords.
+    $roleKeys=if($role-eq 'quoteInk'){@(Get-WidgetColorPalette 'rainbow'|ForEach-Object{[Windows.Media.ColorConverter]::ConvertFromString($_)})}else{$keys}
     $brush=$script:widgetColors.brushes[$role]
     foreach($i in 0..10){
-      $position=$i/10.0*($keys.Count-1);$index=[Math]::Min($keys.Count-2,[int][Math]::Floor($position))
-      $target=Mix-WidgetColor $keys[$index] $keys[$index+1] ($position-$index)
-      if($role-eq 'ink'){$target=Mix-WidgetColor $target ([Windows.Media.ColorConverter]::ConvertFromString('#271938')) 0.44}
+      $position=$i/10.0*($roleKeys.Count-1);$index=[Math]::Min($roleKeys.Count-2,[int][Math]::Floor($position))
+      $target=Mix-WidgetColor $roleKeys[$index] $roleKeys[$index+1] ($position-$index)
+      if($role-in @('ink','quoteInk')){$target=Mix-WidgetColor $target ([Windows.Media.ColorConverter]::ConvertFromString('#271938')) 0.44}
       elseif($role-eq 'surface'){$target=Mix-WidgetColor $target ([Windows.Media.Colors]::White) 0.92}
       $stop=$brush.GradientStops[$i];$from=$stop.Color
       $stop.BeginAnimation([Windows.Media.GradientStop]::ColorProperty,$null);$stop.Color=$target
@@ -185,7 +186,7 @@ function Initialize-WidgetColors {
     $element=$script:ui[$binding[0]];$property=$binding[1]
     $script:widgetColors.original+=@{element=$element;property=$property;value=$element.$property}
   }
-  foreach($role in @('accent','ink','surface')){$null=New-WidgetFlowBrush $role}
+  foreach($role in @('accent','ink','surface','quoteInk')){$null=New-WidgetFlowBrush $role}
   Set-WidgetColorPalette 'rainbow' -Immediate
   $mask=[Windows.Media.ImageBrush]::new($script:ui.Girl.Source)
   $mask.Stretch=[Windows.Media.Stretch]::UniformToFill
@@ -214,7 +215,12 @@ function Update-WidgetColorScene {
   if(!$text -and $script:bubbleMode-eq 'quote'){$text=$script:ui.QuoteText.Text}
   $script:widgetColors.scope=Get-WidgetColorScope $text
   $script:widgetColors.active=$script:widgetColors.scope-ne 'none'
-  if(!$script:widgetColors.active){Restore-WidgetOriginalColors;Set-WidgetQuoteSceneInk;return}
+  if(!$script:widgetColors.active){
+    Restore-WidgetOriginalColors -KeepAnimation
+    Set-WidgetQuoteSceneInk
+    Set-WidgetColorAnimation ($script:window.IsVisible -and !$script:colorPaused -and !$script:collapsed -and $script:bubbleMode-eq 'quote' -and $script:quoteSceneGroup-eq 'unseen')
+    return
+  }
   $palette=if($script:colorMode-eq 'rainbow' -or $script:bubbleMode-ne 'quote'){'rainbow'}else{Resolve-WidgetColorPalette $text}
   Set-WidgetColorPalette $palette
   $accent=$script:widgetColors.brushes.accent;$surface=$script:widgetColors.brushes.surface;$ink=$script:widgetColors.brushes.ink
@@ -242,7 +248,9 @@ function Update-WidgetColorScene {
   Set-WidgetColorAnimation ($script:window.IsVisible -and !$script:colorPaused)
 }
 function Set-WidgetQuoteSceneInk {
-  if($script:bubbleMode-eq 'quote' -and $script:quoteSceneInk){$script:ui.QuoteText.Foreground=$script:quoteSceneInk}
+  if($script:bubbleMode-ne 'quote'){return}
+  if($script:quoteSceneGroup-eq 'unseen' -and $script:widgetColors){$script:ui.QuoteText.Foreground=$script:widgetColors.brushes.quoteInk}
+  elseif($script:quoteSceneInk){$script:ui.QuoteText.Foreground=$script:quoteSceneInk}
 }
 function Set-WidgetColorMode([ValidateSet('original','linked','rainbow','surprise','rare','special','mixed')][string]$Mode){
   $script:colorMode=$Mode

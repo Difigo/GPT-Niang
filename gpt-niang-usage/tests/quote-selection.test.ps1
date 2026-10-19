@@ -64,15 +64,46 @@ try{
   $settings.includeGenerated=$true;Save-WidgetSelectionSettings $data $settings
   $generation.enabled=$false;Save-WidgetGenerationSettings $data $generation
   Assert ((Get-WidgetQuote $data)-eq '已有生成句') 'Disabling model generation never changes source visibility'
-  $script:colorMode='original';$script:quoteInkRandom=[Random]::new(43);$colors=@{}
-  foreach($i in 1..20){$null=Get-WidgetBubbleQuote $data;Assert ($script:quoteSceneInk-is [Windows.Media.SolidColorBrush] -and $script:quoteSceneInk.IsFrozen) 'Each displayed quote gets static ink';$colors[$script:quoteSceneInk.Color.ToString()]=$true}
-  Assert ($colors.Count-ge 3) 'Repeated lines can use distinct colors from the widget palette'
-  $script:bubbleMode='quote';$script:ui=@{QuoteText=[Windows.Controls.TextBlock]::new()};Set-WidgetQuoteSceneInk
-  $brush=$script:ui.QuoteText.Foreground;Set-WidgetQuoteSceneInk
-  Assert ([object]::ReferenceEquals($brush,$script:ui.QuoteText.Foreground)) 'Scene refresh does not change the chosen quote color'
+  $script:colorMode='original';$script:bubbleMode='quote';$script:collapsed=$false
+  $script:window=@{IsVisible=$true};$script:ui=@{QuoteText=[Windows.Controls.TextBlock]::new()}
+  $script:ui.QuoteText.Foreground=[Windows.Media.Brushes]::DarkSlateGray
+  function Get-QuotaRows {return @()}
+  $script:widgetColors=@{phase=[Windows.Media.TranslateTransform]::new();brushes=@{};palette='';running=$false;active=$false;
+    original=@(@{element=$script:ui.QuoteText;property='Foreground';value=$script:ui.QuoteText.Foreground});
+    halo=[Windows.Shapes.Rectangle]::new();tint=[Windows.Shapes.Rectangle]::new()}
+  foreach($role in @('accent','ink','surface','quoteInk')){$null=New-WidgetFlowBrush $role}
+  Set-WidgetColorPalette 'token' -Immediate
+  $firstRainbow=$script:widgetColors.brushes.quoteInk.GradientStops[0].Color
+  Set-WidgetColorPalette 'deepsea' -Immediate
+  Assert ($script:widgetColors.brushes.quoteInk.GradientStops[0].Color-eq $firstRainbow) 'Unseen quote rainbow stays independent of keyword-based surface palettes'
+  $line=Get-WidgetBubbleQuote $data;Update-WidgetColorScene
+  $brush=$script:ui.QuoteText.Foreground
+  Assert ($script:quoteSceneGroup-eq 'unseen' -and $brush-is [Windows.Media.LinearGradientBrush] -and $script:widgetColors.running -and $script:widgetColors.phase.HasAnimatedProperties) 'Unseen quote animates rainbow even when original scene effects are inactive'
+  Assert ([object]::ReferenceEquals($brush.RelativeTransform,$script:widgetColors.phase)) 'Quote ink reuses the original shared animation phase'
+  Register-WidgetQuoteShown $data $line;Update-WidgetColorScene
+  Assert ($script:quoteSceneGroup-eq 'unseen' -and [object]::ReferenceEquals($brush,$script:ui.QuoteText.Foreground)) 'Recording actual display does not recolor the current unseen scene'
+  $script:window.IsVisible=$false;Update-WidgetColorScene
+  Assert (!$script:widgetColors.running) 'Hidden quote stops its color animation'
+  $script:window.IsVisible=$true;$script:colorPaused=$true;Update-WidgetColorScene
+  Assert (!$script:widgetColors.running) 'Pause setting applies to unseen rainbow ink'
+  $script:colorPaused=$false;Update-WidgetColorScene
+  Assert $script:widgetColors.running 'Visible unpaused unseen quote resumes animation'
+  $script:collapsed=$true;Update-WidgetColorScene
+  Assert (!$script:widgetColors.running) 'Collapsed bubble stops quote-only animation'
+  $script:collapsed=$false
+  $script:bubbleMode='quota';Update-WidgetColorScene
+  Assert (!$script:widgetColors.running -and $script:ui.QuoteText.Foreground-eq [Windows.Media.Brushes]::DarkSlateGray) 'Leaving the quote scene restores the original foreground and stops quote-only animation'
+  $script:bubbleMode='quote';$settings.shown=100;$settings.unseen=0;Save-WidgetSelectionSettings $data $settings
+  $null=Get-WidgetBubbleQuote $data;Update-WidgetColorScene
+  Assert ($script:quoteSceneGroup-eq 'shown' -and $script:ui.QuoteText.Foreground.Color-eq [Windows.Media.Colors]::Black -and !$script:widgetColors.running) 'The next display of the same quote uses black with no quote-only animation'
+  Save-WidgetQuoteLibrary $data @{base=@([pscustomobject]@{text=$line;preferred=$true;weight=1});deleted=@()}
+  $settings.preferred=100;$settings.shown=0;Save-WidgetSelectionSettings $data $settings
+  $null=Get-WidgetBubbleQuote $data;Update-WidgetColorScene
+  Assert ($script:quoteSceneGroup-eq 'preferred' -and $script:quoteSceneInk.IsFrozen -and $script:ui.QuoteText.Foreground.Color.ToString()-eq '#FF745A98') 'Preferred wins over display history and uses widget purple'
   $settings.coloredText=$false;Save-WidgetSelectionSettings $data $settings;$null=Get-WidgetBubbleQuote $data
-  Assert ($null-eq $script:quoteSceneInk) 'Color preference is independently editable'
-  Write-Output ('PASS: persisted actual-display rotation, source/generation independence, class shares ('+$preferred+'/200 preferred), zero/empty classes, deletion, validation and static palette ink')
+  Update-WidgetColorScene
+  Assert ($null-eq $script:quoteSceneInk -and !$script:quoteSceneGroup -and $script:ui.QuoteText.Foreground-eq [Windows.Media.Brushes]::DarkSlateGray) 'Disabling class colors restores original foreground behavior'
+  Write-Output ('PASS: persisted actual-display rotation, source/generation independence, class shares ('+$preferred+'/200 preferred), zero/empty classes, deletion, validation and class-based animated ink')
 }finally{
   $target=[IO.Path]::GetFullPath($root);$prefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
   if(!$target.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($target)-notlike 'gpt-niang-selection-*'){throw 'Unexpected selection test directory'}
